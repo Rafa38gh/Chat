@@ -4,18 +4,44 @@
 #include <unistd.h>
 #include <sys/socket.h>
 #include <netinet/in.h> // sock_addr_in
+#include <pthread.h>
+#include <time.h>
 
 
 #define PORT 8080
 
+void* horario_atual(void* arg)
+{
+    int sock = *(int*)arg;
+    char msg[64];
+    char horario[16];
+    time_t agora;
+    struct tm *info_hora;
+
+    while(1)
+    {
+        agora = time(NULL);
+        info_hora = localtime(&agora);
+        info_hora->tm_hour -= 3; // UTC-3
+
+        strftime(horario, sizeof(horario), "%H:%M:%S\n", info_hora);
+        snprintf(msg, sizeof(msg), "Horário Atual: %s", horario);
+
+        send(sock, msg, strlen(msg), 0);
+        sleep(60);
+    }
+} 
+
+//===================================================================================================================
 int main(int argc, char *argv[])
 {
     // Variáveis
     //======================================================================
-    int opt = 1;
+    //int opt = 1;
     int sockfd, novo_socket;
     struct sockaddr_in endereco;
     int addrlen = sizeof(endereco);
+    pthread_t thread_horario;
 
     //======================================================================
     
@@ -27,12 +53,12 @@ int main(int argc, char *argv[])
         exit(EXIT_FAILURE);
     }
 
-    setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR | SO_REUSEPORT, &opt, sizeof(opt));
-    if(setsockopt < 0)
+    //setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR | SO_REUSEPORT, &opt, sizeof(opt));
+    /*if(setsockopt < 0)
     {
         perror("Falha ao definir socket");
         exit(EXIT_FAILURE);
-    }
+    }*/
 
     // Definindo endereço do server
     endereco.sin_family = AF_INET;
@@ -62,6 +88,11 @@ int main(int argc, char *argv[])
         perror("Falha no accept");
         exit(EXIT_FAILURE);
     }
+
+    // Thread para enviar horário
+    pthread_create(&thread_horario, NULL, horario_atual, &novo_socket);
+
+    pthread_join(thread_horario, NULL);
     
     return 0;
 }
