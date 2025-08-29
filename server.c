@@ -10,27 +10,83 @@
 
 #define PORT 8080
 
-void* horario_atual(void* arg)
+char output[1024];
+pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
+pthread_cond_t cond = PTHREAD_COND_INITIALIZER;
+int nova_mensagem = 0;
+
+void* envia_output(void* arg)       // Todos os outputs do server são enviados aqui
 {
     int sock = *(int*)arg;
-    char msg[64];
-    char horario[16];
-    time_t agora;
-    struct tm *info_hora;
+    time_t ultima_hora = 0;
+    
+    while(1)
+    {
+        pthread_mutex_lock(&lock);
+        while(!nova_mensagem)
+        {
+            time_t agora = time(NULL);
+            if(agora - ultima_hora >= 60)
+            {
+                char horario[32];
+                struct tm* tm_info = localtime(&agora);
+                strftime(horario, sizeof(horario), "\nHora Atual: %H:%M\n", tm_info);
+                send(sock, horario, strlen(horario), 0);
+                ultima_hora = agora;
+            }
+
+            struct timespec ts;
+            clock_gettime(CLOCK_REALTIME, &ts);
+            ts.tv_sec += 1;
+            pthread_cond_timedwait(&cond, &lock, &ts);
+        }
+
+        if(nova_mensagem)
+        {
+            send(sock, output, strlen(output), 0);
+            nova_mensagem = 0;
+        }
+        pthread_mutex_unlock(&lock);
+    }
+    return NULL;
+}
+
+void* recebe_mensagens(void* arg)   // Todas as mensagens do client são processadas aqui
+{
+    int sock = *(int*)arg;
+    char buffer[1024];
+    int n;
 
     while(1)
     {
-        agora = time(NULL);
-        info_hora = localtime(&agora);
-        info_hora->tm_hour -= 3; // UTC-3
+        memset(buffer, 0, sizeof(buffer));
+        n = recv(sock, buffer, sizeof(buffer)-1, 0);
 
-        strftime(horario, sizeof(horario), "%H:%M:%S\n", info_hora);
-        snprintf(msg, sizeof(msg), "Horário Atual: %s", horario);
+        if(n > 0)
+        {
+            printf("Mensagem: %s", buffer);
+            fflush(stdout);
+            
+            // Processar mensagem
+            pthread_mutex_lock(&lock);
+            snprintf(output, sizeof(output), "Servidor recebeu: %.*s", (int)(sizeof(output)-20), buffer);
+            nova_mensagem = 1;
+            pthread_cond_signal(&cond);
+            pthread_mutex_unlock(&lock);
 
-        send(sock, msg, strlen(msg), 0);
-        sleep(60);
+        } else if(n == 0)
+        {
+            printf("Conexão encerrada pelo cliente.\n");
+            break;
+
+        } else
+        {
+            perror("Erro ao receber dados do cliente.\n");
+            break;
+        }
     }
-} 
+    return NULL;
+}
 
 //===================================================================================================================
 int main(int argc, char *argv[])
@@ -41,7 +97,8 @@ int main(int argc, char *argv[])
     int sockfd, novo_socket;
     struct sockaddr_in endereco;
     int addrlen = sizeof(endereco);
-    pthread_t thread_horario;
+    pthread_t thread_envia;
+    pthread_t thread_processa;
 
     //======================================================================
     
@@ -89,10 +146,14 @@ int main(int argc, char *argv[])
         exit(EXIT_FAILURE);
     }
 
-    // Thread para enviar horário
-    pthread_create(&thread_horario, NULL, horario_atual, &novo_socket);
+    // Thread para enviar outputs
+    pthread_create(&thread_envia, NULL, envia_output, &novo_socket);
 
-    pthread_join(thread_horario, NULL);
+    // Thread processa mensagens
+    pthread_create(&thread_processa, NULL, recebe_mensagens, &novo_socket);
+
+    pthread_join(thread_envia, NULL);
+    pthread_join(thread_processa, NULL);
     
     return 0;
 }

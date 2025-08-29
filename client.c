@@ -37,12 +37,29 @@ void* print_mensagens(void* arg)
     return NULL;
 }
 
+void* input_mensagens(void* arg)
+{
+    int sock = *(int*)arg;
+    char buffer[1024];
+
+    while(1)
+    {
+        fgets(buffer, sizeof(buffer), stdin);
+        if(buffer != NULL)
+        {
+            send(sock, buffer, strlen(buffer), 0);
+        }
+    }
+    return NULL;
+}
+
 //=======================================================================================================================
 int main() 
 {
     int sock = 0;
     struct sockaddr_in serv_addr;
     pthread_t thread_mensagens;
+    pthread_t thread_input;
 
     // Criando socket
     if ((sock = socket(AF_INET, SOCK_STREAM, 0)) < 0) 
@@ -73,7 +90,11 @@ int main()
     // Thread print mensagens
     pthread_create(&thread_mensagens, NULL, print_mensagens, &sock);
 
+    // Thread input mensagens
+    pthread_create(&thread_input, NULL, input_mensagens, &sock);
+
     pthread_join(thread_mensagens, NULL);
+    pthread_join(thread_input, NULL);
 
     close(sock);
     return 0;
