@@ -9,11 +9,53 @@
 
 
 #define PORT 8080
+#define MAX_CLIENTS 10
+
+
+typedef struct cliente
+{
+    int socket;
+    char nome[50];
+    pthread_t thread_envia;     // Envia mensagens para o client
+    pthread_t thread_processa;  // Processa mensagens do client
+} Cliente;
+
+// Lista global de clientes
+Cliente* clientes[MAX_CLIENTS];
+int num_clientes = 0;
+int limite_clientes = 0;
 
 char output[1024];
 pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
 pthread_cond_t cond = PTHREAD_COND_INITIALIZER;
+pthread_mutex_t clientes_lock = PTHREAD_MUTEX_INITIALIZER;
 int nova_mensagem = 0;
+
+
+// Adiciona clientes na lista
+void adicionar_cliente(Cliente* c) {
+    pthread_mutex_lock(&clientes_lock);
+    if (num_clientes < limite_clientes) {
+        clientes[num_clientes++] = c;
+    }
+    pthread_mutex_unlock(&clientes_lock);
+}
+
+// Remove clientes da lista
+void remover_cliente(Cliente* c) {
+    pthread_mutex_lock(&clientes_lock);
+    for (int i = 0; i < num_clientes; i++) {
+        if (clientes[i] == c) {
+            // desloca os próximos para trás
+            for (int j = i; j < num_clientes-1; j++) {
+                clientes[j] = clientes[j+1];
+            }
+            num_clientes--;
+            break;
+        }
+    }
+    pthread_mutex_unlock(&clientes_lock);
+}
 
 void* envia_output(void* arg)       // Todos os outputs do server são enviados aqui
 {
@@ -97,10 +139,22 @@ int main(int argc, char *argv[])
     int sockfd, novo_socket;
     struct sockaddr_in endereco;
     int addrlen = sizeof(endereco);
-    pthread_t thread_envia;
-    pthread_t thread_processa;
 
     //======================================================================
+
+    // Verificando argumentos
+    if (argc < 2) 
+    {
+        fprintf(stderr, "Uso: %s <limite_de_clientes>\n", argv[0]);
+        exit(EXIT_FAILURE);
+    }
+
+    limite_clientes = atoi(argv[1]);
+    if (limite_clientes <= 0 || limite_clientes > MAX_CLIENTS) 
+    {
+        fprintf(stderr, "Limite inválido (1-%d)\n", MAX_CLIENTS);
+        exit(EXIT_FAILURE);
+    }
     
     // Criando socket
     sockfd = socket(AF_INET, SOCK_STREAM, 0);
@@ -138,22 +192,44 @@ int main(int argc, char *argv[])
         exit(EXIT_FAILURE);
     }
 
-    // Aceitar conexões
-    novo_socket = accept(sockfd, (struct sockaddr *)&endereco, (socklen_t*)&addrlen);
-    if(novo_socket < 0)
+    printf("Servidor iniciado na porta %d Aguardando conexões...\n", PORT);
+
+    // Loop de conexões
+    while(1)
     {
-        perror("Falha no accept");
-        exit(EXIT_FAILURE);
+        int novo_socket = accept(sockfd, (struct sockaddr *)&endereco, (socklen_t*)&addrlen);
+        if(novo_socket < 0)
+        {
+            perror("Falha no accept");
+            continue;
+        }
+
+        // Limite de clientes
+        pthread_mutex_lock(&clientes_lock);
+        if (num_clientes >= limite_clientes) 
+        {
+            pthread_mutex_unlock(&clientes_lock);
+            printf("Conexão recusada: limite de clientes atingido.\n");
+            send(novo_socket, "Servidor cheio!\n", 16, 0);
+            close(novo_socket);
+            continue;
+        }
+        pthread_mutex_unlock(&clientes_lock);
+
+        // Criando cliente
+        Cliente* c = (Cliente*)malloc(sizeof(Cliente));
+        c->socket = novo_socket;
+        snprintf(c->nome, sizeof(c->nome), "Cliente%d", novo_socket);
+
+        adicionar_cliente(c);
+
+        pthread_create(&c->thread_envia, NULL, envia_output, &c->socket);
+        pthread_create(&c->thread_processa, NULL, recebe_mensagens, &c->socket);
+
+        printf("Novo cliente conectado: %s\n", c->nome);
     }
 
-    // Thread para enviar outputs
-    pthread_create(&thread_envia, NULL, envia_output, &novo_socket);
-
-    // Thread processa mensagens
-    pthread_create(&thread_processa, NULL, recebe_mensagens, &novo_socket);
-
-    pthread_join(thread_envia, NULL);
-    pthread_join(thread_processa, NULL);
+    close(sockfd);
     
     return 0;
 }

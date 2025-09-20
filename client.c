@@ -7,7 +7,7 @@
 
 #define PORT 8080
 
-void* print_mensagens(void* arg)
+void* print_mensagens(void* arg)        // Todas as mensagens do client são recebidas aqui
 {
     int sock = *(int*)arg;
     char buffer[1024];
@@ -37,7 +37,7 @@ void* print_mensagens(void* arg)
     return NULL;
 }
 
-void* input_mensagens(void* arg)
+void* input_mensagens(void* arg)        // Todas as mensagens do client são enviadas aqui
 {
     int sock = *(int*)arg;
     char buffer[1024];
