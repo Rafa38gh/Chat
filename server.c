@@ -76,23 +76,49 @@ void* envia_output(void* arg)       // Todos os outputs do server são enviados 
     char buffer[2048];
     int cliente_id;
 
+    time_t ultima_hora = 0;
+
     while (1) 
     {
+        // Bloqueia para acessar a fila
         pthread_mutex_lock(&fila_lock);
+
+        // Espera enquanto a fila estiver vazia, mas desbloqueia periodicamente
         while (VaziaFila(fila_mensagens)) 
         {
-            pthread_cond_wait(&fila_cond, &fila_lock);
-        }
-
-        if (VaziaFila(fila_mensagens)) 
-        {
             pthread_mutex_unlock(&fila_lock);
-            break;
+
+            // Verifica envio da hora
+            time_t agora = time(NULL);
+            if (agora - ultima_hora >= 60) 
+            {
+                char horario[16];
+                char msg_hora[64];
+                struct tm* tm_info = localtime(&agora);
+                strftime(horario, sizeof(horario), "[%H:%M]", tm_info);
+                snprintf(msg_hora, sizeof(msg_hora), "---- HORA ATUAL: %s ----\n", horario);
+
+                pthread_mutex_lock(&clientes_lock);
+                for (int i = 0; i < num_clientes; i++) 
+                {
+                    send(clientes[i]->socket, msg_hora, strlen(msg_hora), 0);
+                }
+                pthread_mutex_unlock(&clientes_lock);
+
+                ultima_hora = agora;
+            }
+
+            // Pequena pausa para não consumir 100% CPU
+            usleep(100000); // 0,1s
+
+            pthread_mutex_lock(&fila_lock);
         }
 
+        // Retira mensagem da fila
         RetiraFila(fila_mensagens, buffer, sizeof(buffer), &cliente_id);
         pthread_mutex_unlock(&fila_lock);
 
+        // Envia mensagem para todos os clientes
         pthread_mutex_lock(&clientes_lock);
         for (int i = 0; i < num_clientes; i++) 
         {
@@ -159,9 +185,11 @@ int main(int argc, char *argv[])
     struct sockaddr_in endereco;
     int addrlen = sizeof(endereco);
 
-    pthread_t thread_broadcast;
+    // Configurando fuso horário
+    setenv("TZ", "America/Sao_Paulo", 1);
+    tzset();
 
-    // Removido: signal(SIGINT, encerra_servidor);
+    pthread_t thread_broadcast;
 
     // Verificando argumentos
     if (argc < 2) 
@@ -235,6 +263,16 @@ int main(int argc, char *argv[])
         snprintf(c->nome, sizeof(c->nome), "Cliente%d", novo_socket);
 
         adicionar_cliente(c);
+
+        // Envia hora atual imediatamente
+        time_t agora = time(NULL);
+        struct tm* tm_info = localtime(&agora);
+        char horario[16];
+        char msg_hora[64];
+        strftime(horario, sizeof(horario), "[%H:%M]", tm_info);
+        snprintf(msg_hora, sizeof(msg_hora), "---- HORA ATUAL: %s ----\n", horario);
+        send(c->socket, msg_hora, strlen(msg_hora), 0);
+
         pthread_create(&c->thread_processa, NULL, recebe_mensagens, c);
 
         printf("Novo cliente conectado: %s\n", c->nome);
