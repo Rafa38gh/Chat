@@ -4,6 +4,7 @@
 #include <unistd.h>
 #include <sys/socket.h>
 #include <netinet/in.h> // sock_addr_in
+#include <arpa/inet.h>
 #include <pthread.h>
 #include <time.h>
 #include "fila.h"
@@ -124,9 +125,9 @@ void* envia_output(void* arg)       // Todos os outputs do server são enviados 
         {
             char msg_final[4096];
             if (clientes[i]->socket == cliente_id)
-                snprintf(msg_final, sizeof(msg_final), "[Você enviou]: %s", buffer);
+                snprintf(msg_final, sizeof(msg_final), "[Você enviou]: %s\n", buffer);
             else
-                snprintf(msg_final, sizeof(msg_final), "%s", buffer);
+                snprintf(msg_final, sizeof(msg_final), "%s\n", buffer);
 
             send(clientes[i]->socket, msg_final, strlen(msg_final), 0);
         }
@@ -153,13 +154,52 @@ void* recebe_mensagens(void* arg)   // Todas as mensagens do client são process
             break;
         }
 
+        buffer[strcspn(buffer, "\r\n")] = 0;
+
+        // Comandos de usuário
+        if(buffer[0] == ':')
+        {
+            if (strncmp(buffer, ":nome ", 6) == 0) 
+            {
+                // Verifica se tem algo depois de ":nome "
+                if (strlen(buffer + 6) == 0) 
+                {
+                    char erro[64] = "Uso correto :nome <novo_nome>\n";
+                    send(c->socket, erro, strlen(erro), 0);
+                }
+                else 
+                {
+                    pthread_mutex_lock(&clientes_lock);
+                    snprintf(c->nome, sizeof(c->nome), "%s", buffer + 6);
+                    pthread_mutex_unlock(&clientes_lock);
+
+                    char msg_confirm[128];
+                    snprintf(msg_confirm, sizeof(msg_confirm), "Seu nome foi alterado para: %s\n", c->nome);
+                    send(c->socket, msg_confirm, strlen(msg_confirm), 0);
+                }
+                continue;
+            }
+            else if (strcmp(buffer, ":quit") == 0) 
+            {
+                char quit[64] = "Você saiu do servidor.\n";
+                send(c->socket, quit, strlen(quit), 0);
+                break;
+            }
+            else 
+            {
+                char erro[64] = "Comando inválido.\n";
+                send(c->socket, erro, strlen(erro), 0);
+                continue;
+            }
+        }
+
         // Horário da mensagem
         time_t t = time(NULL);
         struct tm* tm_info = localtime(&t);
         char msg_completa[2048];
         char horario[16];
         strftime(horario, sizeof(horario), "[%H:%M]", tm_info);
-        snprintf(msg_completa, sizeof(msg_completa), "%s %s: %s", c->nome, horario, buffer);
+        snprintf(msg_completa, sizeof(msg_completa), "%s %s: %s\n", c->nome, horario, buffer);
 
         // Adiciona mensagem na fila
         pthread_mutex_lock(&fila_lock);
@@ -260,7 +300,7 @@ int main(int argc, char *argv[])
 
         Cliente* c = (Cliente*)malloc(sizeof(Cliente));
         c->socket = novo_socket;
-        snprintf(c->nome, sizeof(c->nome), "Cliente%d", novo_socket);
+        snprintf(c->nome, sizeof(c->nome), "%s:%d", inet_ntoa(endereco.sin_addr), ntohs(endereco.sin_port));
 
         adicionar_cliente(c);
 
