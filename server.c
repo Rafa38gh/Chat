@@ -12,6 +12,12 @@
 #define PORT 8080
 #define MAX_CLIENTS 10
 
+// Cores ANSI:
+#define RESET   "\033[0m"
+#define RED     "\033[1;31m"
+#define YELLOW  "\033[1;33m"
+#define GREEN   "\033[1;32m"
+
 // ==============================================================
 // Informações dos clientes
 typedef struct cliente
@@ -38,10 +44,10 @@ pthread_cond_t fila_cond = PTHREAD_COND_INITIALIZER;
 =================================================================*/
 
 // Adiciona clientes na lista
-void adicionar_cliente(Cliente* c) 
+void adicionar_cliente(Cliente* c)
 {
     pthread_mutex_lock(&clientes_lock);
-    if (num_clientes < limite_clientes) 
+    if (num_clientes < limite_clientes)
     {
         clientes[num_clientes++] = c;
     }
@@ -49,15 +55,15 @@ void adicionar_cliente(Cliente* c)
 }
 
 // Remove clientes da lista
-void remover_cliente(Cliente* c) 
+void remover_cliente(Cliente* c)
 {
     pthread_mutex_lock(&clientes_lock);
-    for (int i = 0; i < num_clientes; i++) 
+    for (int i = 0; i < num_clientes; i++)
     {
-        if (clientes[i] == c) 
+        if (clientes[i] == c)
         {
             // desloca os próximos para trás
-            for (int j = i; j < num_clientes-1; j++) 
+            for (int j = i; j < num_clientes-1; j++)
             {
                 clientes[j] = clientes[j+1];
             }
@@ -79,28 +85,28 @@ void* envia_output(void* arg)       // Todos os outputs do server são enviados 
 
     time_t ultima_hora = 0;
 
-    while (1) 
+    while (1)
     {
         // Bloqueia para acessar a fila
         pthread_mutex_lock(&fila_lock);
 
         // Espera enquanto a fila estiver vazia, mas desbloqueia periodicamente
-        while (VaziaFila(fila_mensagens)) 
+        while (VaziaFila(fila_mensagens))
         {
             pthread_mutex_unlock(&fila_lock);
 
             // Verifica envio da hora
             time_t agora = time(NULL);
-            if (agora - ultima_hora >= 60) 
+            if (agora - ultima_hora >= 60)
             {
                 char horario[16];
                 char msg_hora[64];
                 struct tm* tm_info = localtime(&agora);
                 strftime(horario, sizeof(horario), "[%H:%M]", tm_info);
-                snprintf(msg_hora, sizeof(msg_hora), "---- HORA ATUAL: %s ----\n", horario);
+                snprintf(msg_hora, sizeof(msg_hora),YELLOW"---- HORA ATUAL: %s ----\n"RESET, horario);
 
                 pthread_mutex_lock(&clientes_lock);
-                for (int i = 0; i < num_clientes; i++) 
+                for (int i = 0; i < num_clientes; i++)
                 {
                     send(clientes[i]->socket, msg_hora, strlen(msg_hora), 0);
                 }
@@ -121,11 +127,11 @@ void* envia_output(void* arg)       // Todos os outputs do server são enviados 
 
         // Envia mensagem para todos os clientes
         pthread_mutex_lock(&clientes_lock);
-        for (int i = 0; i < num_clientes; i++) 
+        for (int i = 0; i < num_clientes; i++)
         {
             char msg_final[4096];
             if (clientes[i]->socket == cliente_id)
-                snprintf(msg_final, sizeof(msg_final), "[Você enviou]: %s\n", buffer);
+                snprintf(msg_final, sizeof(msg_final), YELLOW"[Você enviou]:"RESET"%s\n", buffer);
             else
                 snprintf(msg_final, sizeof(msg_final), "%s\n", buffer);
 
@@ -143,13 +149,13 @@ void* recebe_mensagens(void* arg)   // Todas as mensagens do client são process
     char buffer[1024];
     int n;
 
-    while(1) 
+    while(1)
     {
         memset(buffer, 0, sizeof(buffer));
         n = recv(c->socket, buffer, sizeof(buffer) - 1, 0);
 
-        if (n <= 0) 
-        {   
+        if (n <= 0)
+        {
             perror("Cliente desconectado");
             break;
         }
@@ -159,35 +165,35 @@ void* recebe_mensagens(void* arg)   // Todas as mensagens do client são process
         // Comandos de usuário
         if(buffer[0] == ':')
         {
-            if (strncmp(buffer, ":nome ", 6) == 0) 
+            if (strncmp(buffer, ":nome ", 6) == 0)
             {
                 // Verifica se tem algo depois de ":nome "
-                if (strlen(buffer + 6) == 0) 
+                if (strlen(buffer + 6) == 0)
                 {
-                    char erro[64] = "Uso correto :nome <novo_nome>\n";
+                    char erro[64] = RED"Uso correto :nome <novo_nome>\n"RESET;
                     send(c->socket, erro, strlen(erro), 0);
                 }
-                else 
+                else
                 {
                     pthread_mutex_lock(&clientes_lock);
                     snprintf(c->nome, sizeof(c->nome), "%s", buffer + 6);
                     pthread_mutex_unlock(&clientes_lock);
 
                     char msg_confirm[128];
-                    snprintf(msg_confirm, sizeof(msg_confirm), "Seu nome foi alterado para: %s\n", c->nome);
+                    snprintf(msg_confirm, sizeof(msg_confirm), YELLOW"Seu nome foi alterado para: "RESET GREEN"%s\n"RESET, c->nome);
                     send(c->socket, msg_confirm, strlen(msg_confirm), 0);
                 }
                 continue;
             }
-            else if (strcmp(buffer, ":quit") == 0) 
+            else if (strcmp(buffer, ":quit") == 0)
             {
-                char quit[64] = "Você saiu do servidor.\n";
+                char quit[64] = YELLOW"Você saiu do servidor.\n"RESET;
                 send(c->socket, quit, strlen(quit), 0);
                 break;
             }
-            else 
+            else
             {
-                char erro[64] = "Comando inválido.\n";
+                char erro[64] = RED"Comando inválido.\n"RESET;
                 send(c->socket, erro, strlen(erro), 0);
                 continue;
             }
@@ -199,7 +205,7 @@ void* recebe_mensagens(void* arg)   // Todas as mensagens do client são process
         char msg_completa[2048];
         char horario[16];
         strftime(horario, sizeof(horario), "[%H:%M]", tm_info);
-        snprintf(msg_completa, sizeof(msg_completa), "%s %s: %s\n", c->nome, horario, buffer);
+        snprintf(msg_completa, sizeof(msg_completa), GREEN"%s"RESET YELLOW"%s"RESET": %s\n", c->nome, horario, buffer);
 
         // Adiciona mensagem na fila
         pthread_mutex_lock(&fila_lock);
@@ -208,7 +214,7 @@ void* recebe_mensagens(void* arg)   // Todas as mensagens do client são process
         pthread_mutex_unlock(&fila_lock);
     }
 
-    printf("%s desconectou.\n", c->nome);
+    printf(GREEN"%s"RESET YELLOW"desconectou.\n"RESET, c->nome);
     remover_cliente(c);
     close(c->socket);
     free(c);
@@ -232,22 +238,22 @@ int main(int argc, char *argv[])
     pthread_t thread_broadcast;
 
     // Verificando argumentos
-    if (argc < 2) 
+    if (argc < 2)
     {
-        fprintf(stderr, "Uso correto: %s <limite_de_clientes>\n", argv[0]);
+        fprintf(stderr, RED"Uso correto: %s <limite_de_clientes>\n"RESET, argv[0]);
         exit(EXIT_FAILURE);
     }
 
     limite_clientes = atoi(argv[1]);
-    if (limite_clientes <= 0 || limite_clientes > MAX_CLIENTS) 
+    if (limite_clientes <= 0 || limite_clientes > MAX_CLIENTS)
     {
-        fprintf(stderr, "Limite inválido (1-%d)\n", MAX_CLIENTS);
+        fprintf(stderr, RED"Limite inválido (1-%d)\n"RESET, MAX_CLIENTS);
         exit(EXIT_FAILURE);
     }
 
     // Inicializando fila de mensagens
     fila_mensagens = CriaFila();
-    
+
     // Criando socket
     sockfd = socket(AF_INET, SOCK_STREAM, 0);
     if(sockfd < 0)
@@ -259,7 +265,7 @@ int main(int argc, char *argv[])
     endereco.sin_family = AF_INET;
     endereco.sin_port = htons(PORT);
     endereco.sin_addr.s_addr = INADDR_ANY;
-    
+
     if(bind(sockfd, (struct sockaddr *)&endereco, sizeof(endereco)) < 0)
     {
         perror("Falha no bind");
@@ -272,7 +278,7 @@ int main(int argc, char *argv[])
         exit(EXIT_FAILURE);
     }
 
-    printf("Servidor iniciado na porta %d Aguardando conexões...\n", PORT);
+    printf(YELLOW"Servidor iniciado na porta %d Aguardando conexões...\n"RESET, PORT);
 
     pthread_create(&thread_broadcast, NULL, envia_output, NULL);
 
@@ -288,10 +294,10 @@ int main(int argc, char *argv[])
 
         // Limite de clientes
         pthread_mutex_lock(&clientes_lock);
-        if (num_clientes >= limite_clientes) 
+        if (num_clientes >= limite_clientes)
         {
             pthread_mutex_unlock(&clientes_lock);
-            printf("Conexão recusada: limite de clientes atingido.\n");
+            printf(YELLOW"Conexão recusada: limite de clientes atingido.\n"RESET);
             send(novo_socket, "Servidor cheio!\n", 16, 0);
             close(novo_socket);
             continue;
@@ -310,19 +316,19 @@ int main(int argc, char *argv[])
         char horario[16];
         char msg_hora[64];
         strftime(horario, sizeof(horario), "[%H:%M]", tm_info);
-        snprintf(msg_hora, sizeof(msg_hora), "---- HORA ATUAL: %s ----\n", horario);
+        snprintf(msg_hora, sizeof(msg_hora), YELLOW"---- HORA ATUAL: %s ----\n"RESET, horario);
         send(c->socket, msg_hora, strlen(msg_hora), 0);
 
         pthread_create(&c->thread_processa, NULL, recebe_mensagens, c);
 
-        printf("Novo cliente conectado: %s\n", c->nome);
+        printf(YELLOW"Novo cliente conectado:"RESET GREEN"%s\n"RESET, c->nome);
     }
 
     close(sockfd);
 
     // Fecha todos os clientes conectados
     pthread_mutex_lock(&clientes_lock);
-    for (int i = 0; i < num_clientes; i++) 
+    for (int i = 0; i < num_clientes; i++)
     {
         pthread_cancel(clientes[i]->thread_processa);
         pthread_join(clientes[i]->thread_processa, NULL);
@@ -336,6 +342,6 @@ int main(int argc, char *argv[])
 
     LiberaFila(fila_mensagens);
 
-    printf("Servidor finalizado com sucesso.\n");
+    printf(YELLOW"Servidor finalizado com sucesso.\n"RESET);
     return 0;
 }
