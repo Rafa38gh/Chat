@@ -1,6 +1,6 @@
 # Chat
 
-#Atenção, é necessário compilar o código usando Linux.
+# Atenção, é necessário compilar o código usando Linux.
 
 1. Conecte-se a máquina virtual:
 ```sh
@@ -13,7 +13,7 @@ Um exemplo prático seria: ssh rafael@127.0.0.0 -p 3333
 sudo mkdir /mnt/chat
 ```
 ```sh
-sudo mount chat /mnt/chat
+sudo mount -t vboxsf chat /mnt/chat
 ```
 
 3. Acesse a pasta compartilhada
@@ -23,15 +23,15 @@ cd /mnt/chat
 
 4. Compile o servidor e o cliente
 ```sh
-gcc server.c -o server
+gcc server.c -o server -lpthread
 ```
 ```sh
-gcc client.c -o client
+gcc client.c -o client -lpthread
 ```
 
 5. Em dois terminais diferentes, execute o cliente e o servidor
 ```sh
-./server
+./server <número de conexões permitidas>
 ```
 ```sh
 ./client
