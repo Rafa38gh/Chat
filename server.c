@@ -19,6 +19,8 @@
 #define RED     "\033[1;31m"
 #define YELLOW  "\033[1;33m"
 #define GREEN   "\033[1;32m"
+#define MAGENTA "\033[1;35m"
+#define CYAN    "\033[1;36m"
 
 // ==============================================================
 // Informações dos clientes
@@ -206,7 +208,7 @@ void* recebe_mensagens(void* arg)   // Todas as mensagens do client são process
         // ===============================================================
         if (eh_comando)
         {
-            if (strncmp(buffer, ":nome ", 6) == 0)
+            if (strncmp(buffer, ":nome ", 6) == 0)                                          // :nome
             {
                 if (strlen(buffer + 6) == 0)
                 {
@@ -227,13 +229,78 @@ void* recebe_mensagens(void* arg)   // Todas as mensagens do client são process
                 }
                 continue;
             }
-            else if (strcmp(buffer, ":quit") == 0)
+            else if (strcmp(buffer, ":quit") == 0)                                          // :quit
             {
                 char quit[64] = YELLOW"Você saiu do servidor.\n"RESET;
                 send(c->socket, quit, strlen(quit), 0);
                 break;
             }
-            else
+            else if (strncmp(buffer, ":pm ", 4) == 0)                                       // :pm <nome> <mensagem>
+            {
+                char *args = buffer + 4;
+
+                // Primeiro token: nome
+                char *nome_dest = strtok(args, " ");
+                char *mensagem  = strtok(NULL, "");
+
+                if (!nome_dest || !mensagem)
+                {
+                    char erro[128] = RED"Uso correto: :pm <nome> <mensagem>\n"RESET;
+                    send(c->socket, erro, strlen(erro), 0);
+                    continue;
+                }
+
+                // Procurar cliente no vetor global
+                pthread_mutex_lock(&clientes_lock);
+
+                Cliente *dest = NULL;
+                for (int i = 0; i < num_clientes; i++)
+                {
+                    if (clientes[i] && strcmp(clientes[i]->nome, nome_dest) == 0)
+                    {
+                        dest = clientes[i];
+                        break;
+                    }
+                }
+
+                pthread_mutex_unlock(&clientes_lock);
+
+                if (!dest)
+                {
+                    char erro[128];
+                    snprintf(erro, sizeof(erro),
+                            RED"Usuário '%s' não encontrado.\n"RESET,
+                            nome_dest);
+                    send(c->socket, erro, strlen(erro), 0);
+                    continue;
+                }
+
+                // ---- PROCESSAR EMOJIS ----
+                char *msg_processada = emoji_parse_message(mensagem);
+                if (!msg_processada)
+                {
+                    msg_processada = strdup(mensagem);
+                }
+                                
+                // Enviar para o destinatário
+                char msg_dest[2048];
+                snprintf(msg_dest, sizeof(msg_dest),
+                        MAGENTA"[PM de %s]: "RESET"%s\n",
+                        c->nome, msg_processada);
+
+                send(dest->socket, msg_dest, strlen(msg_dest), 0);
+
+                // Confirmação para o remetente
+                char msg_self[2048];
+                snprintf(msg_self, sizeof(msg_self),
+                        CYAN"[PM para %s]: "RESET"%s\n",
+                        nome_dest, msg_processada);
+
+                send(c->socket, msg_self, strlen(msg_self), 0);
+
+                continue;
+            }
+            else                                                                            // COMANDO INVÁLIDO
             {
                 char erro[64] = RED"Comando inválido.\n"RESET;
                 send(c->socket, erro, strlen(erro), 0);
