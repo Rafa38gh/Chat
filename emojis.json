@@ -1,0 +1,30 @@
+{
+  "faces": {
+    "grinning": "😀",
+    "smile": "😄",
+    "wink": "😉",
+    "sad": "😢",
+    "angry": "😠"
+  },
+
+  "hands": {
+    "thumbs_up": "👍",
+    "wave": "👋",
+    "clap": "👏",
+    "ok": "👌"
+  },
+
+  "animals": {
+    "dog": "🐶",
+    "cat": "🐱",
+    "frog": "🐸",
+    "monkey": "🐵"
+  },
+
+  "misc": {
+    "fire": "🔥",
+    "heart": "❤️",
+    "star": "⭐",
+    "skull": "💀"
+  }
+}

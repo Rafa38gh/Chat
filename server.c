@@ -7,7 +7,9 @@
 #include <arpa/inet.h>
 #include <pthread.h>
 #include <time.h>
-#include "fila.h"
+#include "libs/fila.h"
+#include "libs/emoji_table.h"
+#include "libs/emoji_parser.h"
 
 #define PORT 8080
 #define MAX_CLIENTS 10
@@ -162,12 +164,50 @@ void* recebe_mensagens(void* arg)   // Todas as mensagens do client são process
 
         buffer[strcspn(buffer, "\r\n")] = 0;
 
-        // Comandos de usuário
-        if(buffer[0] == ':')
+        // ===============================================================
+        // 1) DETECTAR SE É COMANDO OU NÃO (melhor: evita colisão com emojis)
+        // ===============================================================
+        size_t len = strlen(buffer);
+        bool eh_comando = false;
+
+        if (len > 0 && buffer[0] == ':')
+        {
+            // procura o primeiro ':' de fechamento depois do inicial
+            char *end_colon = strchr(buffer + 1, ':');
+
+            // procura o primeiro espaço
+            char *space = strchr(buffer, ' ');
+
+            // Se existe um :fechamento: antes do primeiro espaço (ou não há espaço),
+            // então é um token :emoji: no começo => NÃO é comando.
+            if (end_colon != NULL && (space == NULL || end_colon < space))
+            {
+                eh_comando = false; // emoji no começo — tratar como mensagem
+            }
+            else
+            {
+                // Caso não haja um :fechamento: antes do espaço, pode ser comando.
+                // Verifica comandos conhecidos
+                if (strncmp(buffer, ":nome ", 6) == 0 || strcmp(buffer, ":quit") == 0)
+                {
+                    eh_comando = true;
+                }
+                else
+                {
+                    // Se começa com ':' e não bate com comandos conhecidos,
+                    // consideramos comando inválido (mesma lógica antiga).
+                    eh_comando = true;
+                }
+            }
+        }
+
+        // ===============================================================
+        // 2) PROCESSAMENTO DE COMANDOS
+        // ===============================================================
+        if (eh_comando)
         {
             if (strncmp(buffer, ":nome ", 6) == 0)
             {
-                // Verifica se tem algo depois de ":nome "
                 if (strlen(buffer + 6) == 0)
                 {
                     char erro[64] = RED"Uso correto :nome <novo_nome>\n"RESET;
@@ -180,7 +220,9 @@ void* recebe_mensagens(void* arg)   // Todas as mensagens do client são process
                     pthread_mutex_unlock(&clientes_lock);
 
                     char msg_confirm[128];
-                    snprintf(msg_confirm, sizeof(msg_confirm), YELLOW"Seu nome foi alterado para: "RESET GREEN"%s\n"RESET, c->nome);
+                    snprintf(msg_confirm, sizeof(msg_confirm),
+                             YELLOW"Seu nome foi alterado para: "RESET GREEN"%s\n"RESET,
+                             c->nome);
                     send(c->socket, msg_confirm, strlen(msg_confirm), 0);
                 }
                 continue;
@@ -199,27 +241,48 @@ void* recebe_mensagens(void* arg)   // Todas as mensagens do client são process
             }
         }
 
-        // Horário da mensagem
+        // ===============================================================
+        // 3) NÃO É COMANDO → PROCESSAR EMOJIS
+        // ===============================================================
+        char *msg_processada = emoji_parse_message(buffer);
+        if (!msg_processada) // fallback seguro
+        {
+            msg_processada = strdup(buffer);
+            if (!msg_processada) msg_processada = (char*)""; // caso extremo
+        }
+
+        // ===============================================================
+        // 4) MONTAR A MENSAGEM FINAL COM NOME + HORÁRIO
+        // ===============================================================
         time_t t = time(NULL);
         struct tm* tm_info = localtime(&t);
+
         char msg_completa[2048];
         char horario[16];
         strftime(horario, sizeof(horario), "[%H:%M]", tm_info);
-        snprintf(msg_completa, sizeof(msg_completa), GREEN"%s"RESET YELLOW"%s"RESET": %s\n", c->nome, horario, buffer);
 
-        // Adiciona mensagem na fila
+        snprintf(msg_completa, sizeof(msg_completa),
+                 GREEN"%s"RESET YELLOW"%s"RESET": %s\n",
+                 c->nome, horario, msg_processada);
+
+        // ===============================================================
+        // 5) INSERIR NA FILA PARA ENVIAR A TODOS
+        // ===============================================================
         pthread_mutex_lock(&fila_lock);
         InsereFila(fila_mensagens, msg_completa, c->socket);
         pthread_cond_signal(&fila_cond);
         pthread_mutex_unlock(&fila_lock);
+
+        free(msg_processada);
     }
 
-    printf(GREEN"%s"RESET YELLOW"desconectou.\n"RESET, c->nome);
+    printf(GREEN"%s "RESET YELLOW"desconectou.\n"RESET, c->nome);
     remover_cliente(c);
     close(c->socket);
     free(c);
     return NULL;
 }
+
 
 /*==========================================================================
 Main
@@ -248,6 +311,13 @@ int main(int argc, char *argv[])
     if (limite_clientes <= 0 || limite_clientes > MAX_CLIENTS)
     {
         fprintf(stderr, RED"Limite inválido (1-%d)\n"RESET, MAX_CLIENTS);
+        exit(EXIT_FAILURE);
+    }
+
+    // Carregando tabela de emojis
+    if(!emoji_table_load("emojis.json"))
+    {
+        fprintf(stderr, RED"Falha ao carregar tabela de emojis.\n"RESET);
         exit(EXIT_FAILURE);
     }
 
@@ -339,6 +409,7 @@ int main(int argc, char *argv[])
 
     // Espera thread de broadcast encerrar
     pthread_join(thread_broadcast, NULL);
+    emoji_table_free();     // Libera tabela de emojis
 
     LiberaFila(fila_mensagens);
 
